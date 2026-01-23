@@ -1,0 +1,160 @@
+name: Build macOS (VST3/CLAP)
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build_mac:
+    name: Build macOS
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Install Dependencies
+        run: brew install ninja cmake
+
+      - name: Import Signing Certificate
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE }}
+          P12_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: "admin"
+        run: |
+          echo "$BUILD_CERTIFICATE_BASE64" | base64 --decode > certificate.p12
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security set-keychain-settings -lut 21600 build.keychain
+          security import certificate.p12 -k build.keychain -P "$P12_PASSWORD" -T /usr/bin/codesign -T /usr/bin/productsign
+          security set-key-partition-list -S apple-tool:,apple:,codesign:,productsign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+
+      - name: Clone JUCE Framework
+        run: |
+          git clone --depth 1 --branch develop https://github.com/juce-framework/JUCE.git libs/JUCE
+
+      - name: Setup CLAP Extensions
+        run: |
+          git clone --depth 1 https://github.com/free-audio/clap-juce-extensions.git libs/CLAP_Extensions
+          git clone --depth 1 https://github.com/free-audio/clap.git libs/CLAP_Extensions/clap-libs/clap
+          git clone --depth 1 https://github.com/free-audio/clap-helpers.git libs/CLAP_Extensions/clap-libs/clap-helpers
+
+      - name: Configure CMake
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13 \
+            -DJUCE_DIR=libs/JUCE \
+            -DCLAP_EXTENSIONS_DIR=libs/CLAP_Extensions \
+            -DVILLAIN_BUILD_OFFLINE=ON \
+            -DVILLAIN_BUILD_ONLINE=ON \
+            -DVILLAIN_ENABLE_VST3=ON \
+            -DVILLAIN_ENABLE_CLAP=ON \
+            -DVILLAIN_ENABLE_AU=OFF
+
+      - name: Build All
+        run: cmake --build build --config Release --parallel 4
+
+      - name: Create Sign & Notarize Script
+        run: |
+          cat > notarize_mac.sh << 'EOF'
+          #!/bin/bash
+          set -euo pipefail
+
+          security unlock-keychain -p "admin" build.keychain
+
+          IDENTITY=$(security find-identity -v -p codesigning build.keychain | head -1 | grep '"' | sed 's/^.*"\(.*\)".*$/\1/')
+          if [ -z "${IDENTITY}" ]; then
+            echo "::error::No codesigning identity found in keychain."
+            exit 1
+          fi
+          echo "Signing with identity: $IDENTITY"
+
+          # Find produced plugin bundles (works for both Offline/Online targets).
+          mapfile -t VST3S < <(find build -type d -name "*.vst3" -maxdepth 10 2>/dev/null || true)
+          mapfile -t CLAPS < <(find build -type d -name "*.clap" -maxdepth 10 2>/dev/null || true)
+
+          if [ ${#VST3S[@]} -eq 0 ] && [ ${#CLAPS[@]} -eq 0 ]; then
+            echo "::error::No .vst3 or .clap bundles found under build/."
+            exit 1
+          fi
+
+          sign_one() {
+            local bundle="$1"
+            echo "Signing: $bundle"
+            codesign --force --deep --options runtime --timestamp --sign "bundle"
+            echo "Verifying: $bundle"
+            codesign --verify --deep --strict --verbose=2 "$bundle"
+          }
+
+          notarize_one() {
+            local bundle="$1"
+            local zipname="$2"
+
+            echo "Zipping: zipname"
+            /usr/bin/ditto -c -k --keepParent "zipname"
+
+            echo "Submitting for notarization: $zipname"
+            xcrun notarytool submit "$zipname" \
+              --apple-id "$APPLE_ID" \
+              --password "$APPLE_PASSWORD" \
+              --team-id "$TEAM_ID" \
+              --wait
+
+            echo "Stapling: $bundle"
+            xcrun stapler staple "$bundle" || echo "Stapling failed (non-critical)"
+          }
+
+          # --- VST3 ---
+          for b in "${VST3S[@]}"; do
+            sign_one "$b"
+            base="$(basename "$b")"
+            notarize_one "{base%.vst3}_VST3.zip"
+          done
+
+          # --- CLAP ---
+          for b in "${CLAPS[@]}"; do
+            sign_one "$b"
+            base="$(basename "$b")"
+            notarize_one "{base%.clap}_CLAP.zip"
+          done
+          EOF
+
+          chmod +x notarize_mac.sh
+
+      - name: Sign & Notarize with Retry
+        uses: nick-fields/retry@v3
+        env:
+          APPLE_ID: ${{ secrets.MACOS_NOTARIZATION_USERNAME }}
+          APPLE_PASSWORD: ${{ secrets.MACOS_NOTARIZATION_PASSWORD }}
+          TEAM_ID: ${{ secrets.MACOS_NOTARIZATION_TEAM_ID }}
+        with:
+          timeout_minutes: 30
+          max_attempts: 3
+          retry_wait_seconds: 60
+          command: ./notarize_mac.sh
+
+      - name: Collect Artifacts
+        run: |
+          mkdir -p artifacts_mac/VST3 artifacts_mac/CLAP
+
+          # Copy all bundles found (Offline + Online).
+          find build -type d -name "*.vst3" -maxdepth 10 -exec cp -R "{}" artifacts_mac/VST3/ \; || true
+          find build -type d -name "*.clap" -maxdepth 10 -exec cp -R "{}" artifacts_mac/CLAP/ \; || true
+
+          if [ -z "$(ls -A artifacts_mac/VST3 2>/dev/null)" ] && [ -z "$(ls -A artifacts_mac/CLAP 2>/dev/null)" ]; then
+            echo "::error::No artifacts collected."
+            exit 1
+          fi
+
+      - name: Upload Mac Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Villain-Mac-Universal-Signed
+          path: artifacts_mac/

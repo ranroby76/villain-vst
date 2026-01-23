@@ -1,0 +1,28 @@
+# Build folders
+build/
+out/
+.vs/
+.idea/
+cmake-build-*/
+ECHO is on.
+# OS files
+Thumbs.db
+Desktop.ini
+.DS_Store
+ECHO is on.
+# JUCE / user settings
+**/JuceLibraryCode/
+ECHO is on.
+# Exported artifacts
+*.zip
+*.7z
+*.rar
+*.exe
+*.msi
+*.dmg
+ECHO is on.
+# Logs
+*.log
+ECHO is on.
+# Temporary / backups
+backup*/
