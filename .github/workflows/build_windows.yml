@@ -17,9 +17,9 @@ jobs:
         with:
           lfs: true
 
-      - name: Clone JUCE 8 Framework
+      - name: Clone JUCE 7.0.12 Framework
         run: |
-          git clone --depth 1 --branch 8.0.4 https://github.com/juce-framework/JUCE.git libs/JUCE
+          git clone --depth 1 --branch 7.0.12 https://github.com/juce-framework/JUCE.git libs/JUCE
 
       - name: Configure CMake
         run: |

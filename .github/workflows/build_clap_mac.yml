@@ -37,9 +37,9 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign:,productsign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
 
-      - name: Clone JUCE 7 Framework
+      - name: Clone JUCE 7.0.12 Framework
         run: |
-          git clone --depth 1 --branch 7.0.12 https://github.com/juce-framework/JUCE.git libs/JUCE_7
+          git clone --depth 1 --branch 7.0.12 https://github.com/juce-framework/JUCE.git libs/JUCE
 
       - name: Setup CLAP Extensions
         run: |
@@ -51,7 +51,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13 \
-            -DJUCE_DIR=libs/JUCE_7 \
+            -DJUCE_DIR=libs/JUCE \
             -DCLAP_EXTENSIONS_DIR=libs/CLAP_Extensions \
             -DVILLAIN_ENABLE_VST3=OFF \
             -DVILLAIN_ENABLE_AU=OFF \
