@@ -1,11 +1,3 @@
-# Configure (will auto-detect local JUCE at D:\Workspace\JUCE)
-cmake -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DVILLAIN_ENABLE_VST3=ON
-
-# Build
-cmake --build build --config Release
-
-# Your VST3 will be at:
-# build/Villain_artefacts/Release/VST3/Villain.vst3
 name: Build Windows CLAP
 
 on:
@@ -63,8 +55,8 @@ jobs:
         shell: pwsh
         run: |
           $clapDir = "Villain.clap"
-          clapDir/Contents"
-          contentsDir/x86_64-win"
+          $contentsDir = "$clapDir/Contents"
+          $winDir = "$contentsDir/x86_64-win"
           
           Write-Host "Creating CLAP bundle structure..."
           
@@ -82,7 +74,7 @@ jobs:
             "clap-version" = "1.2.0"
             "type" = "plugin"
           } | ConvertTo-Json
-          Set-Content -Path "manifest
+          Set-Content -Path "$clapDir/clap.json" -Value $manifest
           Write-Host "✓ Created clap.json manifest"
           
           Write-Host "`nFinal CLAP bundle structure:"

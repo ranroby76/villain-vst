@@ -6,14 +6,49 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ==============================================================================
-# Build options
+# Smart defaults based on platform
 # ==============================================================================
-option(VILLAIN_ENABLE_VST3   "Enable VST3 format" OFF)
-option(VILLAIN_ENABLE_AU     "Enable AU format (macOS only)" ON)
-option(VILLAIN_ENABLE_CLAP   "Enable CLAP format" OFF)
+if(WIN32)
+    # Windows: Default to VST3
+    option(VILLAIN_ENABLE_VST3   "Enable VST3 format" ON)
+    option(VILLAIN_ENABLE_AU     "Enable AU format (macOS only)" OFF)
+    option(VILLAIN_ENABLE_CLAP   "Enable CLAP format" OFF)
+elseif(APPLE)
+    # macOS: Default to AU (GitHub Actions will override for VST3/CLAP)
+    option(VILLAIN_ENABLE_VST3   "Enable VST3 format" OFF)
+    option(VILLAIN_ENABLE_AU     "Enable AU format (macOS only)" ON)
+    option(VILLAIN_ENABLE_CLAP   "Enable CLAP format" OFF)
+else()
+    # Linux: Default to VST3
+    option(VILLAIN_ENABLE_VST3   "Enable VST3 format" ON)
+    option(VILLAIN_ENABLE_AU     "Enable AU format (macOS only)" OFF)
+    option(VILLAIN_ENABLE_CLAP   "Enable CLAP format" OFF)
+endif()
 
-# JUCE location - defaults to JUCE 8, but can use JUCE 7 for CLAP
-set(JUCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libs/JUCE" CACHE PATH "Path to JUCE")
+# ==============================================================================
+# JUCE location - Auto-detect local vs GitHub Actions
+# ==============================================================================
+# Default to local JUCE installation
+if(NOT DEFINED JUCE_DIR)
+    if(EXISTS "D:/Workspace/JUCE/CMakeLists.txt")
+        # Local Windows build - use desktop JUCE
+        set(JUCE_DIR "D:/Workspace/JUCE" CACHE PATH "Path to JUCE")
+        message(STATUS "Using local JUCE at: ${JUCE_DIR}")
+    elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/libs/JUCE/CMakeLists.txt")
+        # GitHub Actions build - use libs/JUCE
+        set(JUCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libs/JUCE" CACHE PATH "Path to JUCE")
+        message(STATUS "Using GitHub Actions JUCE at: ${JUCE_DIR}")
+    else()
+        message(FATAL_ERROR "JUCE not found! Please install JUCE at D:/Workspace/JUCE or set JUCE_DIR manually.")
+    endif()
+endif()
+
+# Verify JUCE exists at the determined path
+if(NOT EXISTS "${JUCE_DIR}/CMakeLists.txt")
+    message(FATAL_ERROR "JUCE not found at ${JUCE_DIR}. Please set JUCE_DIR correctly.")
+endif()
+
+message(STATUS "JUCE Directory: ${JUCE_DIR}")
 
 # CLAP extensions location
 set(CLAP_EXTENSIONS_DIR "" CACHE PATH "Path to clap-juce-extensions root folder")
@@ -21,11 +56,7 @@ set(CLAP_EXTENSIONS_DIR "" CACHE PATH "Path to clap-juce-extensions root folder"
 # ==============================================================================
 # JUCE
 # ==============================================================================
-if(EXISTS "${JUCE_DIR}/CMakeLists.txt")
-    add_subdirectory("${JUCE_DIR}" "${CMAKE_BINARY_DIR}/JUCE")
-else()
-    message(FATAL_ERROR "JUCE not found at ${JUCE_DIR}. Please set JUCE_DIR correctly.")
-endif()
+add_subdirectory("${JUCE_DIR}" "${CMAKE_BINARY_DIR}/JUCE")
 
 # ==============================================================================
 # Sources
@@ -128,7 +159,7 @@ target_link_libraries(Villain
 )
 
 # ==============================================================================
-# CLAP support (when enabled with JUCE 7)
+# CLAP support (when enabled with clap-juce-extensions)
 # ==============================================================================
 if(VILLAIN_ENABLE_CLAP AND TARGET clap_juce_extensions)
     clap_juce_extensions_plugin(
