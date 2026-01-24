@@ -62,69 +62,16 @@ jobs:
 
       - name: Verify CLAP Build
         run: |
-          echo "Checking for CLAP output..."
-          if [ -f "build/Villain_artefacts/Release/CLAP/Villain.clap" ]; then
-            echo "✓ CLAP binary found!"
+          echo "Checking for CLAP bundle..."
+          if [ -d "build/Villain_artefacts/Release/CLAP/Villain.clap" ]; then
+            echo "✓ CLAP bundle found!"
             ls -lah build/Villain_artefacts/Release/CLAP/
+            find build/Villain_artefacts/Release/CLAP/Villain.clap -type f
           else
-            echo "✗ CLAP binary NOT found!"
+            echo "✗ CLAP bundle NOT found!"
             find build/Villain_artefacts/ -type f
             exit 1
           fi
-
-      - name: Create CLAP Bundle Structure
-        run: |
-          CLAP_DIR="Villain.clap"
-          CONTENTS_DIR="$CLAP_DIR/Contents"
-          MAC_DIR="$CONTENTS_DIR/MacOS"
-          RESOURCES_DIR="$CONTENTS_DIR/Resources"
-          
-          echo "Creating CLAP bundle structure..."
-          
-          # Create directory structure
-          mkdir -p "$MAC_DIR"
-          mkdir -p "$RESOURCES_DIR"
-          
-          # Copy binary
-          cp "build/Villain_artefacts/Release/CLAP/Villain.clap" "$MAC_DIR/Villain"
-          echo "✓ Copied CLAP binary to $MAC_DIR"
-          
-          # Create Info.plist
-          cat > "$CONTENTS_DIR/Info.plist" << 'EOF'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>CFBundleDevelopmentRegion</key>
-              <string>English</string>
-              <key>CFBundleExecutable</key>
-              <string>Villain</string>
-              <key>CFBundleIdentifier</key>
-              <string>com.fanan.villain</string>
-              <key>CFBundleInfoDictionaryVersion</key>
-              <string>6.0</string>
-              <key>CFBundleName</key>
-              <string>Villain</string>
-              <key>CFBundlePackageType</key>
-              <string>BNDL</string>
-              <key>CFBundleShortVersionString</key>
-              <string>1.0.0</string>
-              <key>CFBundleVersion</key>
-              <string>1.0.0</string>
-              <key>CFBundleSignature</key>
-              <string>VLAN</string>
-          </dict>
-          </plist>
-          EOF
-          echo "✓ Created Info.plist"
-          
-          # Create PkgInfo
-          echo -n "BNDLVLAN" > "$CONTENTS_DIR/PkgInfo"
-          echo "✓ Created PkgInfo"
-          
-          # Verify structure
-          echo -e "\nFinal CLAP bundle structure:"
-          find "$CLAP_DIR" -type f
 
       - name: Sign CLAP Bundle
         run: |
@@ -133,11 +80,11 @@ jobs:
           
           echo "Signing with identity: $IDENTITY"
           
-          # Sign the bundle
-          codesign --force --deep --options runtime --sign "$IDENTITY" "Villain.clap"
+          # Sign the bundle (JUCE already created the correct structure)
+          codesign --force --deep --options runtime --sign "$IDENTITY" "build/Villain_artefacts/Release/CLAP/Villain.clap"
           
           # Verify signature
-          codesign --verify --deep --strict --verbose=2 "Villain.clap"
+          codesign --verify --deep --strict --verbose=2 "build/Villain_artefacts/Release/CLAP/Villain.clap"
           echo "✓ CLAP bundle signed successfully"
 
       - name: Create Notarization Script
@@ -149,7 +96,7 @@ jobs:
           security unlock-keychain -p "admin" build.keychain
           
           # Zip for notarization
-          /usr/bin/ditto -c -k --keepParent "Villain.clap" "Villain_CLAP.zip"
+          /usr/bin/ditto -c -k --keepParent "build/Villain_artefacts/Release/CLAP/Villain.clap" "Villain_CLAP.zip"
           
           # Notarize
           xcrun notarytool submit "Villain_CLAP.zip" \
@@ -159,7 +106,7 @@ jobs:
             --wait
           
           # Staple
-          xcrun stapler staple "Villain.clap" || echo "Stapling failed (non-critical)"
+          xcrun stapler staple "build/Villain_artefacts/Release/CLAP/Villain.clap" || echo "Stapling failed (non-critical)"
           EOF
           chmod +x notarize_clap.sh
 
@@ -179,5 +126,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Villain-Mac-CLAP-Signed
-          path: Villain.clap/
+          path: build/Villain_artefacts/Release/CLAP/Villain.clap
           if-no-files-found: error
