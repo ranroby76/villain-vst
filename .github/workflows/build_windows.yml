@@ -1,8 +1,6 @@
 name: Build Windows (VST3 + CLAP)
 
 on:
-  push:
-    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
@@ -24,7 +22,7 @@ jobs:
 
       - name: Clone JUCE Framework
         run: |
-          git clone --depth 1 --branch develop https://github.com/juce-framework/JUCE.git libs/JUCE
+          git clone --depth 1 --branch 8.0.4 https://github.com/juce-framework/JUCE.git libs/JUCE
 
       - name: Setup CLAP Extensions
         run: |

@@ -1,8 +1,6 @@
 name: Build macOS (VST3/CLAP)
 
 on:
-  push:
-    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
@@ -17,7 +15,9 @@ jobs:
           lfs: true
 
       - name: Install Dependencies
-        run: brew install ninja cmake
+        run: |
+          brew install ninja
+          brew install cmake || brew upgrade cmake
 
       - name: Import Signing Certificate
         env:
@@ -36,7 +36,7 @@ jobs:
 
       - name: Clone JUCE Framework
         run: |
-          git clone --depth 1 --branch develop https://github.com/juce-framework/JUCE.git libs/JUCE
+          git clone --depth 1 --branch 8.0.4 https://github.com/juce-framework/JUCE.git libs/JUCE
 
       - name: Setup CLAP Extensions
         run: |

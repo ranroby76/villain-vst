@@ -17,7 +17,9 @@ jobs:
           lfs: true
 
       - name: Install Dependencies
-        run: brew install ninja cmake
+        run: |
+          brew install ninja
+          brew install cmake || brew upgrade cmake
 
       - name: Import Signing Certificate
         env:
@@ -36,13 +38,7 @@ jobs:
 
       - name: Clone JUCE Framework
         run: |
-          git clone --depth 1 --branch develop https://github.com/juce-framework/JUCE.git libs/JUCE
-
-      - name: Setup CLAP Extensions
-        run: |
-          git clone --depth 1 https://github.com/free-audio/clap-juce-extensions.git libs/CLAP_Extensions
-          git clone --depth 1 https://github.com/free-audio/clap.git libs/CLAP_Extensions/clap-libs/clap
-          git clone --depth 1 https://github.com/free-audio/clap-helpers.git libs/CLAP_Extensions/clap-libs/clap-helpers
+          git clone --depth 1 --branch 8.0.4 https://github.com/juce-framework/JUCE.git libs/JUCE
 
       - name: Configure CMake
         run: |
@@ -51,13 +47,12 @@ jobs:
             -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13 \
             -DJUCE_DIR=libs/JUCE \
-            -DCLAP_EXTENSIONS_DIR=libs/CLAP_Extensions \
             -DVILLAIN_ENABLE_VST3=OFF \
             -DVILLAIN_ENABLE_CLAP=OFF \
             -DVILLAIN_ENABLE_AU=ON
 
-      - name: Build AU Target
-        run: cmake --build build --config Release --target Villain_AU --parallel 4
+      - name: Build AU
+        run: cmake --build build --config Release --parallel 4
 
       - name: Create Notarization Script
         run: |
