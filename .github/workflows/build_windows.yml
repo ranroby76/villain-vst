@@ -1,4 +1,4 @@
-name: Build Windows (VST3)
+name: Build Windows (VST3 + CLAP)
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
 
 jobs:
   build_windows:
-    name: Build Windows VST3
+    name: Build Windows VST3 + CLAP
     runs-on: windows-2022
     
     steps:
@@ -26,22 +26,30 @@ jobs:
         run: |
           git clone --depth 1 --branch develop https://github.com/juce-framework/JUCE.git libs/JUCE
 
+      - name: Setup CLAP Extensions
+        run: |
+          git clone --depth 1 https://github.com/free-audio/clap-juce-extensions.git libs/CLAP_Extensions
+          git clone --depth 1 https://github.com/free-audio/clap.git libs/CLAP_Extensions/clap-libs/clap
+          git clone --depth 1 https://github.com/free-audio/clap-helpers.git libs/CLAP_Extensions/clap-libs/clap-helpers
+
       - name: Configure CMake
         run: |
           cmake -S . -B build -G "Ninja" `
             -DCMAKE_BUILD_TYPE=Release `
             -DJUCE_DIR=libs/JUCE `
+            -DCLAP_EXTENSIONS_DIR=libs/CLAP_Extensions `
             -DVILLAIN_ENABLE_VST3=ON `
-            -DVILLAIN_ENABLE_CLAP=OFF `
+            -DVILLAIN_ENABLE_CLAP=ON `
             -DVILLAIN_ENABLE_AU=OFF
 
-      - name: Build VST3
+      - name: Build All
         run: cmake --build build --config Release --parallel 4
 
       - name: Collect Artifacts
         shell: bash
         run: |
           mkdir -p artifacts_win/VST3
+          mkdir -p artifacts_win/CLAP
           
           if [ -d "build/Villain_artefacts/Release/VST3" ]; then
             cp -R build/Villain_artefacts/Release/VST3/* artifacts_win/VST3/
@@ -50,9 +58,17 @@ jobs:
             echo "::error::VST3 NOT FOUND"
             exit 1
           fi
+          
+          if [ -d "build/Villain_artefacts/Release/CLAP" ]; then
+            cp -R build/Villain_artefacts/Release/CLAP/* artifacts_win/CLAP/
+            echo "CLAP Found."
+          else
+            echo "::error::CLAP NOT FOUND"
+            exit 1
+          fi
 
       - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Villain-Windows-VST3
+          name: Villain-Windows-VST3-CLAP
           path: artifacts_win/

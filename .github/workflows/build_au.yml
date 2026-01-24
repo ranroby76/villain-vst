@@ -1,6 +1,8 @@
 name: Build macOS (AU Only)
 
 on:
+  push:
+    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
