@@ -1,0 +1,2 @@
+knob: 128x128. distance: 49 pixels from right border, 59 pixes from south border
+effect selector: 500x145, 27 pixels from right and left borders, 155 pixels form north border

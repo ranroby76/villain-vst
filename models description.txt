@@ -1,0 +1,13 @@
+The 10 Models:
+ModelCharacter
+
+Console 73Neve-style transformer weight, 3rd harmonic rich
+British CleanSSL-style punch, controlled, minimal coloration
+American PunchAPI-style midrange bite, balanced harmonics
+Desk CreamTrident-style creamy mids, vintage vibe
+Class A Silk - Harrison-style clean warmth, silky highs
+Abbey Glow - EMI TG-style vintage color, soft bandwidth
+Valve Warmth - Tube console 2nd harmonic dominant
+Tape Touch - Studer-style head bump, HF saturation
+Germanium Era - 60s transistor asymmetric fuzz
+Transformer Iron - Heavy transformer coloration

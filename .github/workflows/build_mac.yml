@@ -1,11 +1,11 @@
-name: Build macOS (VST3/CLAP)
+name: Build macOS (VST3)
 
 on:
   workflow_dispatch:
 
 jobs:
   build_mac:
-    name: Build macOS
+    name: Build macOS VST3
     runs-on: macos-latest
     
     steps:
@@ -34,13 +34,9 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign:,productsign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
 
-      - name: Clone JUCE Framework
+      - name: Clone JUCE 8 Framework
         run: |
           git clone --depth 1 --branch 8.0.4 https://github.com/juce-framework/JUCE.git libs/JUCE
-
-      - name: Setup CLAP Extensions
-        run: |
-          git clone --recursive https://github.com/free-audio/clap-juce-extensions.git libs/CLAP_Extensions
 
       - name: Configure CMake
         run: |
@@ -49,77 +45,51 @@ jobs:
             -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13 \
             -DJUCE_DIR=libs/JUCE \
-            -DCLAP_EXTENSIONS_DIR=libs/CLAP_Extensions \
             -DVILLAIN_ENABLE_VST3=ON \
-            -DVILLAIN_ENABLE_CLAP=ON \
-            -DVILLAIN_ENABLE_AU=OFF
+            -DVILLAIN_ENABLE_AU=OFF \
+            -DVILLAIN_ENABLE_CLAP=OFF
 
-      - name: Build All
+      - name: Build VST3
         run: cmake --build build --config Release --parallel 4
 
       - name: Create Notarization Script
         run: |
-          cat > notarize_mac.sh << 'EOF'
+          cat > notarize_vst3.sh << 'EOF'
           #!/bin/bash
           set -e
           
           security unlock-keychain -p "admin" build.keychain
-          
-          echo "Starting Code Signing..."
           IDENTITY=$(security find-identity -v -p codesigning build.keychain | head -1 | grep '"' | sed 's/^.*"\(.*\)".*$/\1/')
-          echo "Signing with identity: $IDENTITY"
           
-          # --- VST3 ---
           if [ -d "build/Villain_artefacts/Release/VST3/Villain.vst3" ]; then
             echo "Processing VST3..."
             
-            echo "Signing VST3 Bundle..."
+            # Sign Bundle
             codesign --force --deep --options runtime --sign "$IDENTITY" "build/Villain_artefacts/Release/VST3/Villain.vst3"
             
-            echo "Verifying VST3..."
+            # Verify
             codesign --verify --deep --strict --verbose=2 "build/Villain_artefacts/Release/VST3/Villain.vst3"
             
-            echo "Creating VST3 Zip..."
+            # Zip
             /usr/bin/ditto -c -k --keepParent "build/Villain_artefacts/Release/VST3/Villain.vst3" "Villain_VST3.zip"
             
-            echo "Submitting VST3 for notarization..."
+            # Notarize
             xcrun notarytool submit "Villain_VST3.zip" \
               --apple-id "$APPLE_ID" \
               --password "$APPLE_PASSWORD" \
               --team-id "$TEAM_ID" \
               --wait
             
-            echo "Stapling VST3..."
+            # Staple
             xcrun stapler staple "build/Villain_artefacts/Release/VST3/Villain.vst3" || echo "Stapling failed (non-critical)"
-          fi
-          
-          # --- CLAP ---
-          if [ -d "build/Villain_artefacts/Release/CLAP/Villain.clap" ]; then
-            echo "Processing CLAP..."
-            
-            echo "Signing CLAP Bundle..."
-            codesign --force --deep --options runtime --sign "$IDENTITY" "build/Villain_artefacts/Release/CLAP/Villain.clap"
-            
-            echo "Verifying CLAP..."
-            codesign --verify --deep --strict --verbose=2 "build/Villain_artefacts/Release/CLAP/Villain.clap"
-            
-            echo "Creating CLAP Zip..."
-            /usr/bin/ditto -c -k --keepParent "build/Villain_artefacts/Release/CLAP/Villain.clap" "Villain_CLAP.zip"
-            
-            echo "Submitting CLAP for notarization..."
-            xcrun notarytool submit "Villain_CLAP.zip" \
-              --apple-id "$APPLE_ID" \
-              --password "$APPLE_PASSWORD" \
-              --team-id "$TEAM_ID" \
-              --wait
-            
-            echo "Stapling CLAP..."
-            xcrun stapler staple "build/Villain_artefacts/Release/CLAP/Villain.clap" || echo "Stapling failed (non-critical)"
+          else
+            echo "::error::VST3 not found!"
+            exit 1
           fi
           EOF
-          chmod +x notarize_mac.sh
+          chmod +x notarize_vst3.sh
 
-      - name: Sign & Notarize with Retry
+      - name: Sign & Notarize VST3 with Retry
         uses: nick-fields/retry@v3
         env:
           APPLE_ID: ${{ secrets.MACOS_NOTARIZATION_USERNAME }}
@@ -129,20 +99,10 @@ jobs:
           timeout_minutes: 30
           max_attempts: 3
           retry_wait_seconds: 60
-          command: ./notarize_mac.sh
+          command: ./notarize_vst3.sh
 
-      - name: Collect Artifacts
-        run: |
-          mkdir -p artifacts_mac
-          if [ -d "build/Villain_artefacts/Release/VST3/Villain.vst3" ]; then
-            cp -R "build/Villain_artefacts/Release/VST3/Villain.vst3" artifacts_mac/
-          fi
-          if [ -d "build/Villain_artefacts/Release/CLAP/Villain.clap" ]; then
-            cp -R "build/Villain_artefacts/Release/CLAP/Villain.clap" artifacts_mac/
-          fi
-
-      - name: Upload Mac Artifacts
+      - name: Upload VST3 Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Villain-Mac-Universal-Signed
-          path: artifacts_mac/
+          name: Villain-Mac-VST3-Signed
+          path: build/Villain_artefacts/Release/VST3/Villain.vst3

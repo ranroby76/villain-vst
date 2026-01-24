@@ -1,0 +1,216 @@
+name: Build CLAP (JUCE 7)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build_clap_windows:
+    name: Build Windows CLAP
+    runs-on: windows-latest
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Clone JUCE 7 Framework
+        run: |
+          git clone --depth 1 --branch 7.0.12 https://github.com/juce-framework/JUCE.git libs/JUCE_7
+
+      - name: Setup CLAP Extensions
+        run: |
+          git clone --recursive https://github.com/free-audio/clap-juce-extensions.git libs/CLAP_Extensions
+
+      - name: Configure CMake for CLAP
+        run: |
+          cmake -B build -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DJUCE_DIR=libs/JUCE_7 `
+            -DCLAP_EXTENSIONS_DIR=libs/CLAP_Extensions `
+            -DVILLAIN_ENABLE_VST3=OFF `
+            -DVILLAIN_ENABLE_AU=OFF `
+            -DVILLAIN_ENABLE_CLAP=ON
+
+      - name: Build CLAP
+        run: cmake --build build --config Release --parallel 4
+
+      - name: Create CLAP Bundle Structure
+        shell: pwsh
+        run: |
+          $clapDir = "Villain.clap"
+          clapDir/Contents"
+          contentsDir/x86_64-win"
+          
+          # Create directory structure
+          New-Item -ItemType Directory -Force -Path $winDir
+          
+          # Copy DLL to correct location
+          Copy-Item "build/Villain_artefacts/Release/CLAP/Villain.clap" "$winDir/Villain.clap"
+          
+          # Create clap.json manifest
+          $manifest = @{
+            "clap-version" = "1.2.0"
+            "type" = "plugin"
+          } | ConvertTo-Json
+          Set-Content -Path "manifest
+          
+          Write-Host "CLAP bundle structure created successfully"
+
+      - name: Upload Windows CLAP
+        uses: actions/upload-artifact@v4
+        with:
+          name: Villain-Windows-CLAP
+          path: Villain.clap/
+
+  build_clap_mac:
+    name: Build macOS CLAP
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Install Dependencies
+        run: |
+          brew install ninja
+          brew install cmake || brew upgrade cmake
+
+      - name: Import Signing Certificate
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE }}
+          P12_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: "admin"
+        run: |
+          echo $BUILD_CERTIFICATE_BASE64 | base64 --decode > certificate.p12
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security set-keychain-settings -lut 21600 build.keychain
+          security import certificate.p12 -k build.keychain -P "$P12_PASSWORD" -T /usr/bin/codesign -T /usr/bin/productsign
+          security set-key-partition-list -S apple-tool:,apple:,codesign:,productsign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+
+      - name: Clone JUCE 7 Framework
+        run: |
+          git clone --depth 1 --branch 7.0.12 https://github.com/juce-framework/JUCE.git libs/JUCE_7
+
+      - name: Setup CLAP Extensions
+        run: |
+          git clone --recursive https://github.com/free-audio/clap-juce-extensions.git libs/CLAP_Extensions
+
+      - name: Configure CMake for CLAP
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13 \
+            -DJUCE_DIR=libs/JUCE_7 \
+            -DCLAP_EXTENSIONS_DIR=libs/CLAP_Extensions \
+            -DVILLAIN_ENABLE_VST3=OFF \
+            -DVILLAIN_ENABLE_AU=OFF \
+            -DVILLAIN_ENABLE_CLAP=ON
+
+      - name: Build CLAP
+        run: cmake --build build --config Release --parallel 4
+
+      - name: Create CLAP Bundle Structure
+        run: |
+          CLAP_DIR="Villain.clap"
+          CONTENTS_DIR="$CLAP_DIR/Contents"
+          MAC_DIR="$CONTENTS_DIR/MacOS"
+          RESOURCES_DIR="$CONTENTS_DIR/Resources"
+          
+          # Create directory structure
+          mkdir -p "$MAC_DIR"
+          mkdir -p "$RESOURCES_DIR"
+          
+          # Copy binary
+          cp "build/Villain_artefacts/Release/CLAP/Villain.clap" "$MAC_DIR/Villain"
+          
+          # Create Info.plist
+          cat > "$CONTENTS_DIR/Info.plist" << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleDevelopmentRegion</key>
+              <string>English</string>
+              <key>CFBundleExecutable</key>
+              <string>Villain</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.fanan.villain</string>
+              <key>CFBundleInfoDictionaryVersion</key>
+              <string>6.0</string>
+              <key>CFBundleName</key>
+              <string>Villain</string>
+              <key>CFBundlePackageType</key>
+              <string>BNDL</string>
+              <key>CFBundleShortVersionString</key>
+              <string>1.0.0</string>
+              <key>CFBundleVersion</key>
+              <string>1.0.0</string>
+              <key>CFBundleSignature</key>
+              <string>VLAN</string>
+          </dict>
+          </plist>
+          EOF
+          
+          # Create PkgInfo
+          echo -n "BNDLVLAN" > "$CONTENTS_DIR/PkgInfo"
+          
+          echo "CLAP bundle structure created successfully"
+
+      - name: Sign CLAP Bundle
+        run: |
+          security unlock-keychain -p "admin" build.keychain
+          IDENTITY=$(security find-identity -v -p codesigning build.keychain | head -1 | grep '"' | sed 's/^.*"\(.*\)".*$/\1/')
+          
+          # Sign the bundle
+          codesign --force --deep --options runtime --sign "$IDENTITY" "Villain.clap"
+          
+          # Verify signature
+          codesign --verify --deep --strict --verbose=2 "Villain.clap"
+
+      - name: Create Notarization Script
+        run: |
+          cat > notarize_clap.sh << 'EOF'
+          #!/bin/bash
+          set -e
+          
+          security unlock-keychain -p "admin" build.keychain
+          
+          # Zip for notarization
+          /usr/bin/ditto -c -k --keepParent "Villain.clap" "Villain_CLAP.zip"
+          
+          # Notarize
+          xcrun notarytool submit "Villain_CLAP.zip" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_PASSWORD" \
+            --team-id "$TEAM_ID" \
+            --wait
+          
+          # Staple
+          xcrun stapler staple "Villain.clap" || echo "Stapling failed (non-critical)"
+          EOF
+          chmod +x notarize_clap.sh
+
+      - name: Notarize CLAP with Retry
+        uses: nick-fields/retry@v3
+        env:
+          APPLE_ID: ${{ secrets.MACOS_NOTARIZATION_USERNAME }}
+          APPLE_PASSWORD: ${{ secrets.MACOS_NOTARIZATION_PASSWORD }}
+          TEAM_ID: ${{ secrets.MACOS_NOTARIZATION_TEAM_ID }}
+        with:
+          timeout_minutes: 30
+          max_attempts: 3
+          retry_wait_seconds: 60
+          command: ./notarize_clap.sh
+
+      - name: Upload macOS CLAP
+        uses: actions/upload-artifact@v4
+        with:
+          name: Villain-Mac-CLAP-Signed
+          path: Villain.clap/

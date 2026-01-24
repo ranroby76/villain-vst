@@ -1,0 +1,10 @@
+continuing the villain - the analog touch vst plugin. 
+always print full fixed codes after fix.
+always give a title with full path title to every fixed file with "#" prefix
+
+
+root folder at D:\Workspace\Villain
+assets folder at: D:\Workspace\Villain\assets
+juce 8 folder located at D:\Workspace\JUCE
+
+confirm you understand the project

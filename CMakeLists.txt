@@ -12,7 +12,7 @@ option(VILLAIN_ENABLE_VST3   "Enable VST3 format" OFF)
 option(VILLAIN_ENABLE_AU     "Enable AU format (macOS only)" ON)
 option(VILLAIN_ENABLE_CLAP   "Enable CLAP format" OFF)
 
-# JUCE location
+# JUCE location - defaults to JUCE 8, but can use JUCE 7 for CLAP
 set(JUCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libs/JUCE" CACHE PATH "Path to JUCE")
 
 # CLAP extensions location
@@ -21,7 +21,11 @@ set(CLAP_EXTENSIONS_DIR "" CACHE PATH "Path to clap-juce-extensions root folder"
 # ==============================================================================
 # JUCE
 # ==============================================================================
-add_subdirectory("${JUCE_DIR}" "${CMAKE_BINARY_DIR}/JUCE")
+if(EXISTS "${JUCE_DIR}/CMakeLists.txt")
+    add_subdirectory("${JUCE_DIR}" "${CMAKE_BINARY_DIR}/JUCE")
+else()
+    message(FATAL_ERROR "JUCE not found at ${JUCE_DIR}. Please set JUCE_DIR correctly.")
+endif()
 
 # ==============================================================================
 # Sources
@@ -63,11 +67,15 @@ if(APPLE AND VILLAIN_ENABLE_AU)
     list(APPEND _formats AU)
 endif()
 
+# CLAP requires VST3 as base format when using clap-juce-extensions
 if(VILLAIN_ENABLE_CLAP AND NOT "${CLAP_EXTENSIONS_DIR}" STREQUAL "")
     if(NOT TARGET clap_juce_extensions)
         add_subdirectory("${CLAP_EXTENSIONS_DIR}" "${CMAKE_BINARY_DIR}/clap_juce_extensions_build")
     endif()
-    list(APPEND _formats CLAP)
+    # Ensure VST3 is in formats for CLAP to work
+    if(NOT "VST3" IN_LIST _formats)
+        list(APPEND _formats VST3)
+    endif()
 endif()
 
 if(NOT _formats)
@@ -120,16 +128,16 @@ target_link_libraries(Villain
 )
 
 # ==============================================================================
-# CLAP support (when enabled)
+# CLAP support (when enabled with JUCE 7)
 # ==============================================================================
 if(VILLAIN_ENABLE_CLAP AND TARGET clap_juce_extensions)
-    target_link_libraries(Villain PRIVATE clap_juce_extensions)
-
     clap_juce_extensions_plugin(
         TARGET Villain
         CLAP_ID "com.fanan.villain"
-        CLAP_FEATURES "audio-effect" "stereo" "mixing" "mastering"
-        CLAP_PROCESS_EVENTS_RESOLUTION_SAMPLES 0
-        CLAP_USE_JUCE_PARAMETER_RANGES DISCRETE
+        CLAP_FEATURES "audio-effect" "stereo"
+        CLAP_MANUAL_URL "https://fanan.com/villain"
+        CLAP_SUPPORT_URL "https://fanan.com/support"
+        CLAP_USE_JUCE_PARAMETER_RANGES ALL
     )
+    message(STATUS "CLAP support enabled via clap-juce-extensions")
 endif()
