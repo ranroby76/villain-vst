@@ -128,6 +128,8 @@ if(VILLAIN_ENABLE_CLAP AND TARGET clap_juce_extensions)
     clap_juce_extensions_plugin(
         TARGET Villain
         CLAP_ID "com.fanan.villain"
-        CLAP_FEATURES audio-effect
+        CLAP_FEATURES "audio-effect" "stereo" "mixing" "mastering"
+        CLAP_PROCESS_EVENTS_RESOLUTION_SAMPLES 0
+        CLAP_USE_JUCE_PARAMETER_RANGES DISCRETE
     )
 endif()
