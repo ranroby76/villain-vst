@@ -1,3 +1,11 @@
+# Configure (will auto-detect local JUCE at D:\Workspace\JUCE)
+cmake -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DVILLAIN_ENABLE_VST3=ON
+
+# Build
+cmake --build build --config Release
+
+# Your VST3 will be at:
+# build/Villain_artefacts/Release/VST3/Villain.vst3
 name: Build Windows CLAP
 
 on:
@@ -17,9 +25,9 @@ jobs:
         with:
           lfs: true
 
-      - name: Clone JUCE 7.0.12 Framework
+      - name: Clone JUCE 8.0.12 Framework
         run: |
-          git clone --depth 1 --branch 7.0.12 https://github.com/juce-framework/JUCE.git libs/JUCE
+          git clone --depth 1 --branch 8.0.12 https://github.com/juce-framework/JUCE.git libs/JUCE
 
       - name: Setup CLAP Extensions
         run: |
@@ -60,10 +68,8 @@ jobs:
           
           Write-Host "Creating CLAP bundle structure..."
           
-          # Create directory structure
           New-Item -ItemType Directory -Force -Path $winDir | Out-Null
           
-          # Copy DLL to correct location
           if (Test-Path "build/Villain_artefacts/Release/CLAP/Villain.clap") {
             Copy-Item "build/Villain_artefacts/Release/CLAP/Villain.clap" "$winDir/Villain.clap"
             Write-Host "✓ Copied CLAP binary to $winDir"
@@ -72,7 +78,6 @@ jobs:
             exit 1
           }
           
-          # Create clap.json manifest
           $manifest = @{
             "clap-version" = "1.2.0"
             "type" = "plugin"
@@ -80,7 +85,6 @@ jobs:
           Set-Content -Path "manifest
           Write-Host "✓ Created clap.json manifest"
           
-          # Verify structure
           Write-Host "`nFinal CLAP bundle structure:"
           Get-ChildItem $clapDir -Recurse | Select-Object FullName
 

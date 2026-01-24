@@ -332,7 +332,8 @@ void VillainAudioProcessorEditor::PresetBar::onLoad()
                                   juce::String loadedName, err;
                                   if (!processor.loadPresetFromFile (file, loadedName, err))
                                   {
-                                      juce::AlertWindow::showMessageBoxAsync (juce::AlertWindow::WarningIcon, "Villain", err);
+                                      // ✅ JUCE 8 FIX: Changed from juce::AlertWindow::WarningIcon
+                                      juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Villain", err);
                                       return;
                                   }
 
@@ -360,7 +361,8 @@ void VillainAudioProcessorEditor::PresetBar::onSave()
                                   juce::String err;
                                   if (!processor.savePresetToFile (file, presetName, err))
                                   {
-                                      juce::AlertWindow::showMessageBoxAsync (juce::AlertWindow::WarningIcon, "Villain", err);
+                                      // ✅ JUCE 8 FIX: Changed from juce::AlertWindow::WarningIcon
+                                      juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Villain", err);
                                       return;
                                   }
 
