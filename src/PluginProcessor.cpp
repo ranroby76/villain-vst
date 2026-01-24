@@ -7,7 +7,6 @@
 static inline float clampf (float v, float lo, float hi) { return (v < lo) ? lo : (v > hi) ? hi : v; }
 static inline int   clampi (int v, int lo, int hi) { return (v < lo) ? lo : (v > hi) ? hi : v; }
 static inline float lerpf  (float a, float b, float t) { return a + (b - a) * t; }
-static inline float dBToGain (float dB) { return std::pow (10.0f, dB / 20.0f); }
 
 //==============================================================================
 // CHEBYSHEV POLYNOMIALS - For targeted harmonic generation
@@ -27,23 +26,6 @@ static inline float fastTanh (float x)
     x = clampf (x, -4.5f, 4.5f);
     float x2 = x * x;
     return x * (27.0f + x2) / (27.0f + 9.0f * x2);
-}
-
-static inline float softClip (float x)
-{
-    // Attempt soft cubic saturation with proper limiting
-    if (x <= -1.0f) return -2.0f / 3.0f;
-    if (x >= 1.0f) return 2.0f / 3.0f;
-    return x - (x * x * x) / 3.0f;
-}
-
-static inline float asymmetricSat (float x, float posAmount, float negAmount)
-{
-    // Asymmetric saturation - different curves for positive/negative
-    if (x >= 0.0f)
-        return fastTanh (x * posAmount) / fastTanh (posAmount);
-    else
-        return fastTanh (x * negAmount) / fastTanh (negAmount);
 }
 
 //==============================================================================

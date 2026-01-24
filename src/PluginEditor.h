@@ -20,7 +20,7 @@ public:
 private:
     void timerCallback() override;
 
-    VillainAudioProcessor& processor;
+    VillainAudioProcessor& processorRef;
     juce::AudioProcessorValueTreeState& apvts;
 
     juce::Image pages[VillainAudioProcessor::kNumModels];
@@ -48,7 +48,7 @@ private:
                 return;
 
             const int frame = juce::jlimit (0, numFrames - 1,
-                                            (int) std::round (sliderPosProportional * (numFrames - 1)));
+                                            (int) std::round (sliderPosProportional * (float) (numFrames - 1)));
 
             if (isVertical)
             {
@@ -138,9 +138,9 @@ private:
 
             juce::Font getTextButtonFont (juce::TextButton&, int /*buttonHeight*/) override
             {
-                return juce::Font (juce::Font::getDefaultSansSerifFontName(),
+                return juce::Font (juce::FontOptions (juce::Font::getDefaultSansSerifFontName(),
                                    juce::jmax (8.0f, fixedFontHeight),
-                                   juce::Font::bold);
+                                   juce::Font::bold));
             }
 
             void drawButtonBackground (juce::Graphics& g,
@@ -205,6 +205,7 @@ private:
     {
     public:
         explicit PresetBar (VillainAudioProcessor& proc);
+        ~PresetBar() override;
 
         void resized() override;
         void paint (juce::Graphics& g) override;

@@ -3,13 +3,12 @@
 
 static juce::Image loadPngFromBinary (const void* data, int size)
 {
-    return juce::ImageCache::getFromMemory (data, (size_t) size);
+    return juce::ImageCache::getFromMemory (data, size);
 }
 
 static juce::Font makeComicLikeFont()
 {
-    // Cross-platform fallback. If you later embed a real comic font TTF, we can load it here.
-    return juce::Font (juce::Font::getDefaultSansSerifFontName(), 16.0f, juce::Font::bold);
+    return juce::Font (juce::FontOptions (juce::Font::getDefaultSansSerifFontName(), 16.0f, juce::Font::bold));
 }
 
 static juce::String stripNumericPrefix (juce::String s)
@@ -26,7 +25,7 @@ static juce::String stripNumericPrefix (juce::String s)
         while (i < s.length())
         {
             const juce::juce_wchar c = s[i];
-            if (c == ' ' || c == '.' || c == ')' || c == '(' || c == '-' || c == ':' || c == '–' || c == '—')
+            if (c == ' ' || c == '.' || c == ')' || c == '(' || c == '-' || c == ':' || c == 0x2013 || c == 0x2014)
                 ++i;
             else
                 break;
@@ -284,6 +283,13 @@ VillainAudioProcessorEditor::PresetBar::PresetBar (VillainAudioProcessor& proc)
     refreshPresetName();
 }
 
+VillainAudioProcessorEditor::PresetBar::~PresetBar()
+{
+    presetBox.setLookAndFeel (nullptr);
+    loadButton.setLookAndFeel (nullptr);
+    saveButton.setLookAndFeel (nullptr);
+}
+
 void VillainAudioProcessorEditor::PresetBar::paint (juce::Graphics& g)
 {
     g.setColour (juce::Colour::fromRGB (25, 25, 25));
@@ -366,7 +372,7 @@ void VillainAudioProcessorEditor::PresetBar::onSave()
 //==============================================================================
 VillainAudioProcessorEditor::VillainAudioProcessorEditor (VillainAudioProcessor& p)
     : AudioProcessorEditor (&p),
-      processor (p),
+      processorRef (p),
       apvts (p.getAPVTS()),
       modelGrid (apvts),
       presetBar (p),
