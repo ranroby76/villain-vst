@@ -1,6 +1,8 @@
 name: Build macOS (VST3/CLAP)
 
 on:
+  push:
+    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
