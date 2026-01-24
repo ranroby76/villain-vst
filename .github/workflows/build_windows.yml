@@ -1,4 +1,4 @@
-name: Build Windows (VST3/CLAP)
+name: Build Windows (VST3)
 
 on:
   push:
@@ -7,9 +7,9 @@ on:
 
 jobs:
   build_windows:
-    name: Build Windows
+    name: Build Windows VST3
     runs-on: windows-2022
-
+    
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -19,55 +19,40 @@ jobs:
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Install Ninja + CMake
-        run: choco install ninja cmake -y
+      - name: Install Ninja
+        run: choco install ninja
 
       - name: Clone JUCE Framework
         run: |
           git clone --depth 1 --branch develop https://github.com/juce-framework/JUCE.git libs/JUCE
-
-      - name: Setup CLAP Extensions
-        run: |
-          git clone --depth 1 https://github.com/free-audio/clap-juce-extensions.git libs/CLAP_Extensions
-          git clone --depth 1 https://github.com/free-audio/clap.git libs/CLAP_Extensions/clap-libs/clap
-          git clone --depth 1 https://github.com/free-audio/clap-helpers.git libs/CLAP_Extensions/clap-libs/clap-helpers
 
       - name: Configure CMake
         run: |
           cmake -S . -B build -G "Ninja" `
             -DCMAKE_BUILD_TYPE=Release `
             -DJUCE_DIR=libs/JUCE `
-            -DCLAP_EXTENSIONS_DIR=libs/CLAP_Extensions `
-            -DVILLAIN_BUILD_OFFLINE=ON `
-            -DVILLAIN_BUILD_ONLINE=ON `
             -DVILLAIN_ENABLE_VST3=ON `
-            -DVILLAIN_ENABLE_CLAP=ON `
+            -DVILLAIN_ENABLE_CLAP=OFF `
             -DVILLAIN_ENABLE_AU=OFF
 
-      - name: Build All
+      - name: Build VST3
         run: cmake --build build --config Release --parallel 4
 
       - name: Collect Artifacts
-        shell: pwsh
+        shell: bash
         run: |
-          New-Item -ItemType Directory -Force -Path artifacts_win | Out-Null
-          New-Item -ItemType Directory -Force -Path artifacts_win\VST3 | Out-Null
-          New-Item -ItemType Directory -Force -Path artifacts_win\CLAP | Out-Null
-
-          $vst3 = Get-ChildItem -Path build -Recurse -Directory -Filter "*.vst3" -ErrorAction SilentlyContinue
-          $clap = Get-ChildItem -Path build -Recurse -Directory -Filter "*.clap" -ErrorAction SilentlyContinue
-
-          if ($vst3.Count -eq 0) { Write-Error "No .vst3 artifacts found under build/"; exit 1 }
-          if ($clap.Count -eq 0) { Write-Error "No .clap artifacts found under build/"; exit 1 }
-
-          foreach (vst3) { Copy-Item -Recurse -Force $d.FullName "artifacts_win\VST3\" }
-          foreach (clap) { Copy-Item -Recurse -Force $d.FullName "artifacts_win\CLAP\" }
-
-          "VST3 count: $($vst3.Count)"
-          "CLAP count: $($clap.Count)"
+          mkdir -p artifacts_win/VST3
+          
+          if [ -d "build/Villain_artefacts/Release/VST3" ]; then
+            cp -R build/Villain_artefacts/Release/VST3/* artifacts_win/VST3/
+            echo "VST3 Found."
+          else
+            echo "::error::VST3 NOT FOUND"
+            exit 1
+          fi
 
       - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Villain-Windows-x64
+          name: Villain-Windows-VST3
           path: artifacts_win/

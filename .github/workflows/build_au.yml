@@ -7,7 +7,7 @@ jobs:
   build_au:
     name: Build AU
     runs-on: macos-latest
-
+    
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -23,7 +23,7 @@ jobs:
           P12_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
           KEYCHAIN_PASSWORD: "admin"
         run: |
-          echo "$BUILD_CERTIFICATE_BASE64" | base64 --decode > certificate.p12
+          echo $BUILD_CERTIFICATE_BASE64 | base64 --decode > certificate.p12
           security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
           security default-keychain -s build.keychain
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
@@ -36,7 +36,7 @@ jobs:
         run: |
           git clone --depth 1 --branch develop https://github.com/juce-framework/JUCE.git libs/JUCE
 
-      - name: Setup CLAP Extensions (safe even if AU-only)
+      - name: Setup CLAP Extensions
         run: |
           git clone --depth 1 https://github.com/free-audio/clap-juce-extensions.git libs/CLAP_Extensions
           git clone --depth 1 https://github.com/free-audio/clap.git libs/CLAP_Extensions/clap-libs/clap
@@ -50,64 +50,48 @@ jobs:
             -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13 \
             -DJUCE_DIR=libs/JUCE \
             -DCLAP_EXTENSIONS_DIR=libs/CLAP_Extensions \
-            -DVILLAIN_BUILD_OFFLINE=ON \
-            -DVILLAIN_BUILD_ONLINE=ON \
             -DVILLAIN_ENABLE_VST3=OFF \
             -DVILLAIN_ENABLE_CLAP=OFF \
             -DVILLAIN_ENABLE_AU=ON
 
-      - name: Build AU Targets
-        run: |
-          # Build both variants' AU targets explicitly.
-          cmake --build build --config Release --target Villain_Offline_AU --parallel 4
-          cmake --build build --config Release --target Villain_Online_AU --parallel 4
+      - name: Build AU Target
+        run: cmake --build build --config Release --target Villain_AU --parallel 4
 
-      - name: Create Sign & Notarize Script
+      - name: Create Notarization Script
         run: |
           cat > notarize_au.sh << 'EOF'
           #!/bin/bash
-          set -euo pipefail
-
+          set -e
+          
           security unlock-keychain -p "admin" build.keychain
-
           IDENTITY=$(security find-identity -v -p codesigning build.keychain | head -1 | grep '"' | sed 's/^.*"\(.*\)".*$/\1/')
-          if [ -z "${IDENTITY}" ]; then
-            echo "::error::No codesigning identity found in keychain."
-            exit 1
-          fi
-          echo "Signing with identity: $IDENTITY"
-
-          mapfile -t AUS < <(find build -type d -name "*.component" -maxdepth 10 2>/dev/null || true)
-          if [ ${#AUS[@]} -eq 0 ]; then
-            echo "::error::No .component bundles found under build/."
-            exit 1
-          fi
-
-          for b in "${AUS[@]}"; do
-            echo "Signing: $b"
-            codesign --force --deep --options runtime --timestamp --sign "b"
-
-            echo "Verifying: $b"
-            codesign --verify --deep --strict --verbose=2 "$b"
-
-            base="$(basename "$b")"
-            zipname="${base%.component}_AU.zip"
-
-            echo "Zipping: zipname"
-            /usr/bin/ditto -c -k --keepParent "zipname"
-
-            echo "Submitting for notarization: $zipname"
-            xcrun notarytool submit "$zipname" \
+          
+          if [ -d "build/Villain_artefacts/Release/AU/Villain.component" ]; then
+            echo "Processing AU..."
+            
+            # Sign Bundle
+            codesign --force --deep --options runtime --sign "$IDENTITY" "build/Villain_artefacts/Release/AU/Villain.component"
+            
+            # Verify
+            codesign --verify --deep --strict --verbose=2 "build/Villain_artefacts/Release/AU/Villain.component"
+            
+            # Zip
+            /usr/bin/ditto -c -k --keepParent "build/Villain_artefacts/Release/AU/Villain.component" "Villain_AU.zip"
+            
+            # Notarize
+            xcrun notarytool submit "Villain_AU.zip" \
               --apple-id "$APPLE_ID" \
               --password "$APPLE_PASSWORD" \
               --team-id "$TEAM_ID" \
               --wait
-
-            echo "Stapling: $b"
-            xcrun stapler staple "$b" || echo "Stapling failed (non-critical)"
-          done
+            
+            # Staple
+            xcrun stapler staple "build/Villain_artefacts/Release/AU/Villain.component" || echo "Stapling failed (non-critical)"
+          else
+            echo "::error::AU Component not found!"
+            exit 1
+          fi
           EOF
-
           chmod +x notarize_au.sh
 
       - name: Sign & Notarize AU with Retry
@@ -122,17 +106,8 @@ jobs:
           retry_wait_seconds: 60
           command: ./notarize_au.sh
 
-      - name: Collect Artifacts
-        run: |
-          mkdir -p artifacts_au
-          find build -type d -name "*.component" -maxdepth 10 -exec cp -R "{}" artifacts_au/ \; || true
-          if [ -z "$(ls -A artifacts_au 2>/dev/null)" ]; then
-            echo "::error::No AU artifacts collected."
-            exit 1
-          fi
-
       - name: Upload AU Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Villain-Mac-AU-Signed
-          path: artifacts_au/
+          path: build/Villain_artefacts/Release/AU/Villain.component

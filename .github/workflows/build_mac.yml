@@ -9,7 +9,7 @@ jobs:
   build_mac:
     name: Build macOS
     runs-on: macos-latest
-
+    
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -25,7 +25,7 @@ jobs:
           P12_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
           KEYCHAIN_PASSWORD: "admin"
         run: |
-          echo "$BUILD_CERTIFICATE_BASE64" | base64 --decode > certificate.p12
+          echo $BUILD_CERTIFICATE_BASE64 | base64 --decode > certificate.p12
           security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
           security default-keychain -s build.keychain
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
@@ -52,8 +52,6 @@ jobs:
             -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13 \
             -DJUCE_DIR=libs/JUCE \
             -DCLAP_EXTENSIONS_DIR=libs/CLAP_Extensions \
-            -DVILLAIN_BUILD_OFFLINE=ON \
-            -DVILLAIN_BUILD_ONLINE=ON \
             -DVILLAIN_ENABLE_VST3=ON \
             -DVILLAIN_ENABLE_CLAP=ON \
             -DVILLAIN_ENABLE_AU=OFF
@@ -61,71 +59,66 @@ jobs:
       - name: Build All
         run: cmake --build build --config Release --parallel 4
 
-      - name: Create Sign & Notarize Script
+      - name: Create Notarization Script
         run: |
           cat > notarize_mac.sh << 'EOF'
           #!/bin/bash
-          set -euo pipefail
-
+          set -e
+          
           security unlock-keychain -p "admin" build.keychain
-
+          
+          echo "Starting Code Signing..."
           IDENTITY=$(security find-identity -v -p codesigning build.keychain | head -1 | grep '"' | sed 's/^.*"\(.*\)".*$/\1/')
-          if [ -z "${IDENTITY}" ]; then
-            echo "::error::No codesigning identity found in keychain."
-            exit 1
-          fi
           echo "Signing with identity: $IDENTITY"
-
-          # Find produced plugin bundles (works for both Offline/Online targets).
-          mapfile -t VST3S < <(find build -type d -name "*.vst3" -maxdepth 10 2>/dev/null || true)
-          mapfile -t CLAPS < <(find build -type d -name "*.clap" -maxdepth 10 2>/dev/null || true)
-
-          if [ ${#VST3S[@]} -eq 0 ] && [ ${#CLAPS[@]} -eq 0 ]; then
-            echo "::error::No .vst3 or .clap bundles found under build/."
-            exit 1
-          fi
-
-          sign_one() {
-            local bundle="$1"
-            echo "Signing: $bundle"
-            codesign --force --deep --options runtime --timestamp --sign "bundle"
-            echo "Verifying: $bundle"
-            codesign --verify --deep --strict --verbose=2 "$bundle"
-          }
-
-          notarize_one() {
-            local bundle="$1"
-            local zipname="$2"
-
-            echo "Zipping: zipname"
-            /usr/bin/ditto -c -k --keepParent "zipname"
-
-            echo "Submitting for notarization: $zipname"
-            xcrun notarytool submit "$zipname" \
+          
+          # --- VST3 ---
+          if [ -d "build/Villain_artefacts/Release/VST3/Villain.vst3" ]; then
+            echo "Processing VST3..."
+            
+            echo "Signing VST3 Bundle..."
+            codesign --force --deep --options runtime --sign "$IDENTITY" "build/Villain_artefacts/Release/VST3/Villain.vst3"
+            
+            echo "Verifying VST3..."
+            codesign --verify --deep --strict --verbose=2 "build/Villain_artefacts/Release/VST3/Villain.vst3"
+            
+            echo "Creating VST3 Zip..."
+            /usr/bin/ditto -c -k --keepParent "build/Villain_artefacts/Release/VST3/Villain.vst3" "Villain_VST3.zip"
+            
+            echo "Submitting VST3 for notarization..."
+            xcrun notarytool submit "Villain_VST3.zip" \
               --apple-id "$APPLE_ID" \
               --password "$APPLE_PASSWORD" \
               --team-id "$TEAM_ID" \
               --wait
-
-            echo "Stapling: $bundle"
-            xcrun stapler staple "$bundle" || echo "Stapling failed (non-critical)"
-          }
-
-          # --- VST3 ---
-          for b in "${VST3S[@]}"; do
-            sign_one "$b"
-            base="$(basename "$b")"
-            notarize_one "{base%.vst3}_VST3.zip"
-          done
-
+            
+            echo "Stapling VST3..."
+            xcrun stapler staple "build/Villain_artefacts/Release/VST3/Villain.vst3" || echo "Stapling failed (non-critical)"
+          fi
+          
           # --- CLAP ---
-          for b in "${CLAPS[@]}"; do
-            sign_one "$b"
-            base="$(basename "$b")"
-            notarize_one "{base%.clap}_CLAP.zip"
-          done
+          if [ -d "build/Villain_artefacts/Release/CLAP/Villain.clap" ]; then
+            echo "Processing CLAP..."
+            
+            echo "Signing CLAP Bundle..."
+            codesign --force --deep --options runtime --sign "$IDENTITY" "build/Villain_artefacts/Release/CLAP/Villain.clap"
+            
+            echo "Verifying CLAP..."
+            codesign --verify --deep --strict --verbose=2 "build/Villain_artefacts/Release/CLAP/Villain.clap"
+            
+            echo "Creating CLAP Zip..."
+            /usr/bin/ditto -c -k --keepParent "build/Villain_artefacts/Release/CLAP/Villain.clap" "Villain_CLAP.zip"
+            
+            echo "Submitting CLAP for notarization..."
+            xcrun notarytool submit "Villain_CLAP.zip" \
+              --apple-id "$APPLE_ID" \
+              --password "$APPLE_PASSWORD" \
+              --team-id "$TEAM_ID" \
+              --wait
+            
+            echo "Stapling CLAP..."
+            xcrun stapler staple "build/Villain_artefacts/Release/CLAP/Villain.clap" || echo "Stapling failed (non-critical)"
+          fi
           EOF
-
           chmod +x notarize_mac.sh
 
       - name: Sign & Notarize with Retry
@@ -142,15 +135,12 @@ jobs:
 
       - name: Collect Artifacts
         run: |
-          mkdir -p artifacts_mac/VST3 artifacts_mac/CLAP
-
-          # Copy all bundles found (Offline + Online).
-          find build -type d -name "*.vst3" -maxdepth 10 -exec cp -R "{}" artifacts_mac/VST3/ \; || true
-          find build -type d -name "*.clap" -maxdepth 10 -exec cp -R "{}" artifacts_mac/CLAP/ \; || true
-
-          if [ -z "$(ls -A artifacts_mac/VST3 2>/dev/null)" ] && [ -z "$(ls -A artifacts_mac/CLAP 2>/dev/null)" ]; then
-            echo "::error::No artifacts collected."
-            exit 1
+          mkdir -p artifacts_mac
+          if [ -d "build/Villain_artefacts/Release/VST3/Villain.vst3" ]; then
+            cp -R "build/Villain_artefacts/Release/VST3/Villain.vst3" artifacts_mac/
+          fi
+          if [ -d "build/Villain_artefacts/Release/CLAP/Villain.clap" ]; then
+            cp -R "build/Villain_artefacts/Release/CLAP/Villain.clap" artifacts_mac/
           fi
 
       - name: Upload Mac Artifacts
