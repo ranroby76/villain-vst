@@ -9,7 +9,7 @@ on:
 jobs:
   build_mac_clap:
     name: Build macOS CLAP
-    runs-on: macos-latest
+    runs-on: macos-14
     
     steps:
       - name: Checkout Repository
@@ -21,6 +21,9 @@ jobs:
         run: |
           brew install ninja
           brew install cmake || brew upgrade cmake
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.7
 
       - name: Import Signing Certificate
         env:
@@ -50,7 +53,9 @@ jobs:
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 \
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache \
             -DJUCE_DIR=libs/JUCE \
             -DCLAP_EXTENSIONS_DIR=libs/CLAP_Extensions \
             -DVILLAIN_ENABLE_VST3=OFF \
@@ -64,28 +69,14 @@ jobs:
         run: |
           echo "Checking for CLAP bundle..."
           if [ -d "build/Villain_artefacts/Release/CLAP/Villain.clap" ]; then
-            echo "✓ CLAP bundle found!"
+            echo "CLAP bundle found!"
             ls -lah build/Villain_artefacts/Release/CLAP/
             find build/Villain_artefacts/Release/CLAP/Villain.clap -type f
           else
-            echo "✗ CLAP bundle NOT found!"
+            echo "CLAP bundle NOT found!"
             find build/Villain_artefacts/ -type f
             exit 1
           fi
-
-      - name: Sign CLAP Bundle
-        run: |
-          security unlock-keychain -p "admin" build.keychain
-          IDENTITY=$(security find-identity -v -p codesigning build.keychain | head -1 | grep '"' | sed 's/^.*"\(.*\)".*$/\1/')
-          
-          echo "Signing with identity: $IDENTITY"
-          
-          # Sign the bundle (JUCE already created the correct structure)
-          codesign --force --deep --options runtime --sign "$IDENTITY" "build/Villain_artefacts/Release/CLAP/Villain.clap"
-          
-          # Verify signature
-          codesign --verify --deep --strict --verbose=2 "build/Villain_artefacts/Release/CLAP/Villain.clap"
-          echo "✓ CLAP bundle signed successfully"
 
       - name: Create Notarization Script
         run: |
@@ -94,6 +85,23 @@ jobs:
           set -e
           
           security unlock-keychain -p "admin" build.keychain
+          IDENTITY=$(security find-identity -v -p codesigning build.keychain | head -1 | grep '"' | sed 's/^.*"\(.*\)".*$/\1/')
+          
+          echo "Signing with identity: $IDENTITY"
+
+          # Sign inner binaries first
+          find "build/Villain_artefacts/Release/CLAP/Villain.clap" -type f \( -name "*.dylib" -o -name "*.so" \) \
+            -exec codesign --force --strict --options runtime --sign "$IDENTITY" --timestamp {} \;
+
+          find "build/Villain_artefacts/Release/CLAP/Villain.clap" -type d -name "*.framework" \
+            -exec codesign --force --strict --options runtime --sign "$IDENTITY" --timestamp {} \;
+
+          # Sign the bundle (no --deep)
+          codesign --force --strict --options runtime --sign "$IDENTITY" --timestamp "build/Villain_artefacts/Release/CLAP/Villain.clap"
+          
+          # Verify
+          codesign --verify --strict --verbose=2 "build/Villain_artefacts/Release/CLAP/Villain.clap"
+          echo "CLAP bundle signed successfully"
           
           # Zip for notarization
           /usr/bin/ditto -c -k --keepParent "build/Villain_artefacts/Release/CLAP/Villain.clap" "Villain_CLAP.zip"
