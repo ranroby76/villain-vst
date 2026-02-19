@@ -1,0 +1,318 @@
+name: Build macOS Installer (VST3/AU/CLAP)
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+env:
+  PLUGIN_NAME: "Villain"
+  PLUGIN_VERSION: "1.0.0"
+  IDENTIFIER_PREFIX: "com.fanan"
+
+jobs:
+  build_mac_installer:
+    name: Build macOS Installer
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Install Dependencies
+        run: |
+          brew install ninja
+          brew install cmake || brew upgrade cmake
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.7
+
+      - name: Import Signing Certificate
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE }}
+          P12_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: "admin"
+        run: |
+          echo $BUILD_CERTIFICATE_BASE64 | base64 --decode > certificate.p12
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security set-keychain-settings -lut 21600 build.keychain
+          security import certificate.p12 -k build.keychain -P "$P12_PASSWORD" -T /usr/bin/codesign -T /usr/bin/productsign -T /usr/bin/pkgbuild -T /usr/bin/productbuild
+          security set-key-partition-list -S apple-tool:,apple:,codesign:,productsign:,pkgbuild:,productbuild: -s -k "$KEYCHAIN_PASSWORD" build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+
+      - name: Clone JUCE 8.0.12 Framework
+        run: |
+          git clone --depth 1 --branch 8.0.12 https://github.com/juce-framework/JUCE.git libs/JUCE
+
+      - name: Setup CLAP Extensions
+        run: |
+          git clone --recursive https://github.com/free-audio/clap-juce-extensions.git libs/CLAP_Extensions
+
+      # ── Build VST3 + CLAP ──
+      - name: Configure CMake (VST3 + CLAP)
+        run: |
+          cmake -B build_vst3_clap -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 \
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache \
+            -DJUCE_DIR=libs/JUCE \
+            -DCLAP_EXTENSIONS_DIR=libs/CLAP_Extensions \
+            -DVILLAIN_ENABLE_VST3=ON \
+            -DVILLAIN_ENABLE_AU=OFF \
+            -DVILLAIN_ENABLE_CLAP=ON
+
+      - name: Build VST3 + CLAP
+        run: cmake --build build_vst3_clap --config Release --parallel 4
+
+      # ── Build AU separately ──
+      - name: Configure CMake (AU)
+        run: |
+          cmake -B build_au -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 \
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache \
+            -DJUCE_DIR=libs/JUCE \
+            -DVILLAIN_ENABLE_VST3=OFF \
+            -DVILLAIN_ENABLE_AU=ON \
+            -DVILLAIN_ENABLE_CLAP=OFF
+
+      - name: Build AU
+        run: cmake --build build_au --config Release --parallel 4
+
+      - name: Verify Builds
+        run: |
+          echo "=== Checking build artefacts ==="
+          FAIL=0
+
+          if [ -d "build_vst3_clap/Villain_artefacts/Release/VST3/Villain.vst3" ]; then
+            echo "✅ VST3 found"
+          else
+            echo "❌ VST3 NOT found"; FAIL=1
+          fi
+
+          if [ -d "build_au/Villain_artefacts/Release/AU/Villain.component" ]; then
+            echo "✅ AU found"
+          else
+            echo "❌ AU NOT found"; FAIL=1
+          fi
+
+          if [ -d "build_vst3_clap/Villain_artefacts/Release/CLAP/Villain.clap" ]; then
+            echo "✅ CLAP found"
+          else
+            echo "⚠️  CLAP not found (non-critical)"
+          fi
+
+          if [ $FAIL -eq 1 ]; then exit 1; fi
+
+      # ── Sign all bundles ──
+      - name: Sign All Bundles
+        run: |
+          security unlock-keychain -p "admin" build.keychain
+          IDENTITY=$(security find-identity -v -p codesigning build.keychain | grep "Developer ID Application" | head -1 | grep -o '"[^"]*"' | sed 's/"//g')
+          echo "Signing with: $IDENTITY"
+
+          sign_bundle() {
+            local BUNDLE="$1"
+            echo "Signing $(basename $BUNDLE)..."
+
+            find "$BUNDLE" -type f \( -name "*.dylib" -o -name "*.so" \) \
+              -exec codesign --force --strict --options runtime --sign "$IDENTITY" --timestamp {} \;
+
+            find "$BUNDLE" -type d -name "*.framework" \
+              -exec codesign --force --strict --options runtime --sign "$IDENTITY" --timestamp {} \;
+
+            codesign --force --strict --options runtime --sign "$IDENTITY" --timestamp "$BUNDLE"
+            codesign --verify --strict --verbose=2 "$BUNDLE"
+          }
+
+          sign_bundle "build_vst3_clap/Villain_artefacts/Release/VST3/Villain.vst3"
+          sign_bundle "build_au/Villain_artefacts/Release/AU/Villain.component"
+
+          if [ -d "build_vst3_clap/Villain_artefacts/Release/CLAP/Villain.clap" ]; then
+            sign_bundle "build_vst3_clap/Villain_artefacts/Release/CLAP/Villain.clap"
+          fi
+
+      # ── Build component packages ──
+      - name: Create Component Packages
+        run: |
+          mkdir -p pkg_root_vst3/Library/Audio/Plug-Ins/VST3
+          mkdir -p pkg_root_au/Library/Audio/Plug-Ins/Components
+          mkdir -p pkg_root_clap/Library/Audio/Plug-Ins/CLAP
+
+          cp -R "build_vst3_clap/Villain_artefacts/Release/VST3/Villain.vst3" \
+            pkg_root_vst3/Library/Audio/Plug-Ins/VST3/
+
+          cp -R "build_au/Villain_artefacts/Release/AU/Villain.component" \
+            pkg_root_au/Library/Audio/Plug-Ins/Components/
+
+          pkgbuild --root pkg_root_vst3 \
+            --identifier "${IDENTIFIER_PREFIX}.villain.vst3" \
+            --version "${PLUGIN_VERSION}" \
+            --install-location "/" \
+            Villain_VST3.pkg
+
+          pkgbuild --root pkg_root_au \
+            --identifier "${IDENTIFIER_PREFIX}.villain.au" \
+            --version "${PLUGIN_VERSION}" \
+            --install-location "/" \
+            Villain_AU.pkg
+
+          if [ -d "build_vst3_clap/Villain_artefacts/Release/CLAP/Villain.clap" ]; then
+            cp -R "build_vst3_clap/Villain_artefacts/Release/CLAP/Villain.clap" \
+              pkg_root_clap/Library/Audio/Plug-Ins/CLAP/
+
+            pkgbuild --root pkg_root_clap \
+              --identifier "${IDENTIFIER_PREFIX}.villain.clap" \
+              --version "${PLUGIN_VERSION}" \
+              --install-location "/" \
+              Villain_CLAP.pkg
+
+            echo "HAS_CLAP=true" >> $GITHUB_ENV
+          else
+            echo "HAS_CLAP=false" >> $GITHUB_ENV
+          fi
+
+      # ── Prepare installer branding ──
+      - name: Prepare Installer Resources
+        run: |
+          mkdir -p installer_resources
+
+          sips -z 124 372 assets/villain_logo.png --out installer_resources/product_logo.png 2>/dev/null || true
+          sips -z 80 180 assets/logo.png --out installer_resources/team_logo.png 2>/dev/null || true
+
+          if command -v magick &>/dev/null; then
+            magick -size 620x418 xc:white \
+              installer_resources/product_logo.png -gravity north -geometry +0+60 -composite \
+              installer_resources/team_logo.png -gravity south -geometry +0+40 -composite \
+              installer_resources/background.png
+          else
+            cp assets/villain_logo.png installer_resources/background.png
+          fi
+
+          cat > installer_resources/welcome.html << 'WELCOME'
+          <html>
+          <body style="font-family: -apple-system, Helvetica, Arial, sans-serif; padding: 20px;">
+          <h1>Villain Plugin Installer</h1>
+          <p>Welcome to the <b>Villain</b> plugin installer by <b>Fanan Team</b>.</p>
+          <p>This installer will place the selected plugin formats into your system's Audio Plug-Ins folder.</p>
+          <p>Select which formats you'd like to install on the next screen.</p>
+          <br>
+          <p style="color: #666; font-size: 11px;">Version VERSION_PLACEHOLDER</p>
+          </body>
+          </html>
+          WELCOME
+
+          sed -i '' "s/VERSION_PLACEHOLDER/${PLUGIN_VERSION}/g" installer_resources/welcome.html
+
+      # ── Create distribution XML with component choices ──
+      - name: Create Distribution XML
+        run: |
+          if [ "$HAS_CLAP" = "true" ]; then
+            CLAP_CHOICE='
+              <choice id="clap" title="CLAP Plugin" description="Install Villain.clap to /Library/Audio/Plug-Ins/CLAP" start_selected="true">
+                <pkg-ref id="com.fanan.villain.clap"/>
+              </choice>
+              <pkg-ref id="com.fanan.villain.clap" version="'"${PLUGIN_VERSION}"'">Villain_CLAP.pkg</pkg-ref>'
+            CLAP_LINE='<line choice="clap"/>'
+          else
+            CLAP_CHOICE=""
+            CLAP_LINE=""
+          fi
+
+          cat > distribution.xml << DISTXML
+          <?xml version="1.0" encoding="utf-8"?>
+          <installer-gui-script minSpecVersion="2">
+              <title>Villain - Fanan Team</title>
+              <background file="background.png" alignment="bottomleft" scaling="proportional"/>
+              <welcome file="welcome.html" mime-type="text/html"/>
+              <options customize="always" require-scripts="false" hostArchitectures="x86_64,arm64"/>
+
+              <choices-outline>
+                  <line choice="vst3"/>
+                  <line choice="au"/>
+                  ${CLAP_LINE}
+              </choices-outline>
+
+              <choice id="vst3" title="VST3 Plugin" description="Install Villain.vst3 to /Library/Audio/Plug-Ins/VST3" start_selected="true">
+                  <pkg-ref id="com.fanan.villain.vst3"/>
+              </choice>
+
+              <choice id="au" title="Audio Unit (AU)" description="Install Villain.component to /Library/Audio/Plug-Ins/Components" start_selected="true">
+                  <pkg-ref id="com.fanan.villain.au"/>
+              </choice>
+
+              ${CLAP_CHOICE}
+
+              <pkg-ref id="com.fanan.villain.vst3" version="${PLUGIN_VERSION}">Villain_VST3.pkg</pkg-ref>
+              <pkg-ref id="com.fanan.villain.au" version="${PLUGIN_VERSION}">Villain_AU.pkg</pkg-ref>
+          </installer-gui-script>
+          DISTXML
+
+      # ── Build final product package ──
+      - name: Build Product Installer
+        run: |
+          security unlock-keychain -p "admin" build.keychain
+
+          INSTALLER_IDENTITY=$(security find-identity -v build.keychain | grep "Developer ID Installer" | head -1 | grep -o '"[^"]*"' | sed 's/"//g')
+
+          if [ -n "$INSTALLER_IDENTITY" ]; then
+            echo "Signing installer with: $INSTALLER_IDENTITY"
+            productbuild \
+              --distribution distribution.xml \
+              --resources installer_resources \
+              --package-path . \
+              --sign "$INSTALLER_IDENTITY" \
+              --timestamp \
+              "Villain_Installer.pkg"
+          else
+            echo "::warning::No Developer ID Installer certificate found — installer will be unsigned"
+            productbuild \
+              --distribution distribution.xml \
+              --resources installer_resources \
+              --package-path . \
+              "Villain_Installer.pkg"
+          fi
+
+      # ── Notarize the installer ──
+      - name: Notarize Installer
+        env:
+          APPLE_ID: ${{ secrets.MACOS_NOTARIZATION_USERNAME }}
+          APPLE_PASSWORD: ${{ secrets.MACOS_NOTARIZATION_PASSWORD }}
+          TEAM_ID: ${{ secrets.MACOS_NOTARIZATION_TEAM_ID }}
+        run: |
+          echo "Submitting installer for notarization..."
+          xcrun notarytool submit "Villain_Installer.pkg" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_PASSWORD" \
+            --team-id "$TEAM_ID" \
+            --wait
+
+          xcrun stapler staple "Villain_Installer.pkg"
+
+      # ── Create DMG containing the installer ──
+      - name: Create DMG
+        run: |
+          mkdir -p dmg_contents
+          cp "Villain_Installer.pkg" dmg_contents/
+          cp assets/villain_logo.png dmg_contents/ 2>/dev/null || true
+
+          hdiutil create \
+            -volname "Villain Installer" \
+            -srcfolder dmg_contents \
+            -ov -format UDZO \
+            "Villain_Mac_Installer_v${PLUGIN_VERSION}.dmg"
+
+      - name: Upload Installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Villain-Mac-Installer-v${{ env.PLUGIN_VERSION }}
+          path: Villain_Mac_Installer_v*.dmg
+          if-no-files-found: error
