@@ -9,20 +9,20 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Smart defaults based on platform
 # ==============================================================================
 if(WIN32)
-    # Windows: Default to VST3
+    # Windows: Default to VST3 + CLAP
     option(VILLAIN_ENABLE_VST3   "Enable VST3 format" ON)
     option(VILLAIN_ENABLE_AU     "Enable AU format (macOS only)" OFF)
-    option(VILLAIN_ENABLE_CLAP   "Enable CLAP format" OFF)
+    option(VILLAIN_ENABLE_CLAP   "Enable CLAP format" ON)
 elseif(APPLE)
-    # macOS: Default to AU (GitHub Actions will override for VST3/CLAP)
+    # macOS: Default to AU + CLAP
     option(VILLAIN_ENABLE_VST3   "Enable VST3 format" OFF)
     option(VILLAIN_ENABLE_AU     "Enable AU format (macOS only)" ON)
-    option(VILLAIN_ENABLE_CLAP   "Enable CLAP format" OFF)
+    option(VILLAIN_ENABLE_CLAP   "Enable CLAP format" ON)
 else()
-    # Linux: Default to VST3
+    # Linux: Default to VST3 + CLAP
     option(VILLAIN_ENABLE_VST3   "Enable VST3 format" ON)
     option(VILLAIN_ENABLE_AU     "Enable AU format (macOS only)" OFF)
-    option(VILLAIN_ENABLE_CLAP   "Enable CLAP format" OFF)
+    option(VILLAIN_ENABLE_CLAP   "Enable CLAP format" ON)
 endif()
 
 # ==============================================================================
@@ -50,8 +50,18 @@ endif()
 
 message(STATUS "JUCE Directory: ${JUCE_DIR}")
 
-# CLAP extensions location
-set(CLAP_EXTENSIONS_DIR "" CACHE PATH "Path to clap-juce-extensions root folder")
+# CLAP extensions location - auto-detect
+if(NOT DEFINED CLAP_EXTENSIONS_DIR OR "${CLAP_EXTENSIONS_DIR}" STREQUAL "")
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/libs/CLAP_Extensions/CMakeLists.txt")
+        set(CLAP_EXTENSIONS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libs/CLAP_Extensions" CACHE PATH "Path to clap-juce-extensions root folder")
+        message(STATUS "Found CLAP Extensions at: ${CLAP_EXTENSIONS_DIR}")
+    else()
+        set(CLAP_EXTENSIONS_DIR "" CACHE PATH "Path to clap-juce-extensions root folder")
+        if(VILLAIN_ENABLE_CLAP)
+            message(WARNING "CLAP enabled but clap-juce-extensions not found at libs/CLAP_Extensions. CLAP will be skipped.")
+        endif()
+    endif()
+endif()
 
 # ==============================================================================
 # JUCE
